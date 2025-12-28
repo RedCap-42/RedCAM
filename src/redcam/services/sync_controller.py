@@ -14,7 +14,7 @@ from redcam.core.usecases.sync_videos import SyncVideosUseCase
 from redcam.domain.gps_types import GPSTrack, VideoLocation
 from redcam.infra.garmin.fit_parser import FitParser
 from redcam.infra.system.file_stat import OSFileStat
-from redcam.infra.video.gopro_metadata_adapter import GoProVideoMetadataAdapter
+from redcam.infra.video.universal_adapter import UniversalVideoMetadataAdapter
 from redcam.infra.video.os_video_catalog import OSVideoCatalog
 
 
@@ -38,12 +38,16 @@ class SyncController:
 
         # Adapters infra (cache côté metadata)
         self._video_catalog = OSVideoCatalog()
-        self._video_metadata = GoProVideoMetadataAdapter()
+        self._video_metadata = UniversalVideoMetadataAdapter()
         self._file_stat = OSFileStat()
         
         # Chemins chargés
         self.fit_path: Optional[str] = None
         self.video_folder: Optional[str] = None
+
+    def set_camera_type(self, camera_type: str) -> None:
+        """Définit le type de caméra (GoPro, DJI, Insta360...)."""
+        self._video_metadata.set_camera_type(camera_type)
     
     def load_fit_file(self, filepath: str) -> bool:
         """
@@ -83,7 +87,8 @@ class SyncController:
         self, 
         progress_callback: Optional[Callable[[int, int], None]] = None,
         force_timestamp_sync: bool = False,
-        camera_filter: str = "Auto (Détection)"
+        camera_filter: str = "Auto (Détection)",
+        manual_offset_seconds: float = 0.0
     ) -> List[VideoLocation]:
         """
         Traite toutes les vidéos du dossier sélectionné.
@@ -92,6 +97,7 @@ class SyncController:
             progress_callback: Fonction de callback (current, total)
             force_timestamp_sync: Forcer la synchro timestamp
             camera_filter: Filtre de modèle de caméra
+            manual_offset_seconds: Décalage temporel manuel en secondes
             
         Returns:
             Liste des VideoLocation
@@ -100,12 +106,16 @@ class SyncController:
             print("Erreur: Aucun dossier vidéo sélectionné")
             return []
 
+        # Configurer l'adapter selon le filtre caméra
+        self.set_camera_type(camera_filter)
+
         request = SyncRequest(
             fit_path=self.fit_path,
             video_folder=self.video_folder,
             force_timestamp_sync=force_timestamp_sync,
             camera_filter=camera_filter,
             local_timezone=self.local_timezone,
+            manual_offset_seconds=manual_offset_seconds
         )
 
         # Use-case core

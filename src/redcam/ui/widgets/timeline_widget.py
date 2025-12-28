@@ -27,8 +27,8 @@ from concurrent.futures import ThreadPoolExecutor
 from redcam.domain.gps_types import VideoLocation, GPSTrack, GPSPoint
 
 # Constantes de style
-COLOR_TIMELINE_BG = QColor("#121212")  # Très sombre, presque noir
-COLOR_TRACK_BG = QColor("#1e1e1e")     # Fond de piste sombre
+COLOR_TIMELINE_BG = QColor("#1e1e1e")  # Match global background to remove "black bar" effect
+COLOR_TRACK_BG = QColor("#252525")     # Fond de piste un peu plus clair (Panel)
 COLOR_GPS_TRACK = QColor("#4caf50")
 COLOR_VIDEO_CLIP = QColor("#4682b4")   # SteelBlue, plus proche de Resolve
 COLOR_VIDEO_HOVER = QColor("#5a9bc4")
@@ -53,8 +53,11 @@ class ThumbnailWorker(QObject):
         self.executor = ThreadPoolExecutor(max_workers=max_workers)
         self.processed = set()
         self.lock = threading.Lock()
+        self._stopped = False
 
     def request_thumbnail(self, video_path, duration):
+        if self._stopped:
+            return
         with self.lock:
             if video_path in self.processed:
                 return
@@ -63,15 +66,21 @@ class ThumbnailWorker(QObject):
         self.executor.submit(self._generate_task, video_path, duration)
 
     def stop(self):
+        self._stopped = True
         self.executor.shutdown(wait=False)
 
     def _generate_task(self, path, duration):
+        if self._stopped:
+            return
         try:
             image = self._generate_thumbnail(path, duration)
             if image:
-                self.thumbnail_ready.emit(path, image)
+                if not self._stopped:
+                    self.thumbnail_ready.emit(path, image)
         except Exception as e:
-            print(f"Thumbnail error for {path}: {e}")
+            # Silence errors during shutdown
+            if not self._stopped:
+                print(f"Thumbnail error for {path}: {e}")
 
     def _generate_thumbnail(self, path, duration):
         if not os.path.exists(path):
@@ -483,7 +492,9 @@ class TimelineWidget(QWidget):
         if viewport_width > 0:
             width = max(width, viewport_width)
 
-        height = 140
+        # Dynamic height to fit viewport but ensure min height
+        viewport_height = self.view.viewport().height()
+        height = max(120, viewport_height) if viewport_height > 0 else 140
         
         self.scene.setSceneRect(0, 0, width, height)
         
@@ -686,9 +697,15 @@ class TimelineWidget(QWidget):
         """Sélectionne une vidéo depuis l'extérieur (ex: map)."""
         if video_path in self.clip_items:
             item = self.clip_items[video_path]
+            
+            # Check if already selected (avoids jump if loop from click)
+            already_selected = (self.selected_item == item)
+            
             self.select_clip_item(item)
-            # Scroll to item if needed
-            self.view.ensureVisible(item)
+            
+            # Scroll to item only if it wasn't already selected (external selection)
+            if not already_selected:
+                self.view.ensureVisible(item)
 
     def _fit_to_view(self) -> None:
         """Ajuste automatiquement le zoom pour occuper la largeur disponible."""
@@ -810,3 +827,10 @@ class TimelineWidget(QWidget):
     def set_position(self, timestamp: datetime):
         """Met à jour la position visuelle depuis l'extérieur."""
         self._set_position_from_time(timestamp, emit_signal=False)
+
+    def cleanup(self):
+        """Nettoyage des ressources."""
+        if hasattr(self, 'thumbnail_worker'):
+            self.thumbnail_worker.stop()
+        if hasattr(self, 'timer'):
+            self.timer.stop()

@@ -22,6 +22,7 @@ class SyncRequest:
     force_timestamp_sync: bool = False
     camera_filter: str = "Auto (Détection)"
     local_timezone: str = "Europe/Paris"
+    manual_offset_seconds: float = 0.0
 
 
 @dataclass(frozen=True)

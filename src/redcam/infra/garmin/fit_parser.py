@@ -210,6 +210,47 @@ class FitParser:
         
         return None
     
+    def get_track_segment(self, start_time: datetime, duration_seconds: float) -> List[GPSPoint]:
+        """
+        Retourne un segment de la trace correspondant à une plage temporelle.
+        Inclut les points interpolés au début et à la fin pour couvrir exactement la durée.
+        
+        Args:
+            start_time: Temps de début (UTC)
+            duration_seconds: Durée en secondes
+            
+        Returns:
+            Liste des points GPS du segment
+        """
+        if not self.track or not self.track.points:
+            return []
+            
+        if start_time.tzinfo is None:
+            start_time = start_time.replace(tzinfo=timezone.utc)
+            
+        end_time = start_time + timedelta(seconds=duration_seconds)
+        
+        # 1. Récupérer les points strictement inclus
+        segment = []
+        for p in self.track.points:
+            if p.timestamp and start_time < p.timestamp < end_time:
+                segment.append(p)
+                
+        # 2. Interpoler le point de début
+        start_point = self._find_position_exact(self.track.points, start_time)
+        if start_point:
+            segment.insert(0, start_point)
+            
+        # 3. Interpoler le point de fin
+        end_point = self._find_position_exact(self.track.points, end_time)
+        if end_point:
+            segment.append(end_point)
+            
+        # Si on n'a trouvé aucun point (ni inclus, ni interpolé), c'est que la plage est hors trace
+        # ou que la trace est trop courte/incomplète.
+        
+        return segment
+
     def _find_position_exact(
         self, 
         points: list, 
@@ -312,3 +353,93 @@ class FitParser:
                 nearest = point
         
         return nearest
+
+    def is_time_in_track(self, time_to_check: datetime, tolerance_seconds: float = 300.0) -> bool:
+        """Vérifie si un temps donné est couvert par la trace (avec tolérance)."""
+        if not self.track or not self.track.start_time or not self.track.end_time:
+            return False
+            
+        # S'assurer que time_to_check est UTC
+        if time_to_check.tzinfo is None:
+            time_to_check = time_to_check.replace(tzinfo=timezone.utc)
+            
+        start = self.track.start_time - timedelta(seconds=tolerance_seconds)
+        end = self.track.end_time + timedelta(seconds=tolerance_seconds)
+        
+        return start <= time_to_check <= end
+
+    def get_position_at_time(self, target_time: datetime, tolerance_hours: float = 2.0) -> Optional[GPSPoint]:
+        """
+        Trouve la position GPS la plus proche d'un instant donné.
+        """
+        if not self.track or not self.track.points:
+            return None
+            
+        # S'assurer que target_time est UTC
+        if target_time.tzinfo is None:
+            target_time = target_time.replace(tzinfo=timezone.utc)
+            
+        # Vérifier tolérance globale
+        if not self.is_time_in_track(target_time, tolerance_hours * 3600):
+            return None
+            
+        return self._find_nearest_point(target_time)
+
+    def get_track_segment(self, start_time: datetime, duration_seconds: float) -> List[GPSPoint]:
+        """
+        Récupère les points de la trace correspondant à une plage temporelle.
+        Utilisé pour déduire le tracé d'une vidéo non-GPS.
+        
+        Args:
+            start_time: Début de la vidéo
+            duration_seconds: Durée de la vidéo
+            
+        Returns:
+            Liste des points GPS correspondants (segment couvrant la durée)
+        """
+        if not self.track or not self.track.points:
+            return []
+            
+        # S'assurer que start_time est UTC
+        if start_time.tzinfo is None:
+            start_time = start_time.replace(tzinfo=timezone.utc)
+            
+        end_time = start_time + timedelta(seconds=duration_seconds)
+        
+        start_idx = -1
+        min_diff_start = float('inf')
+        
+        end_idx = -1
+        min_diff_end = float('inf')
+        
+        # Trouver les indices des points les plus proches du début et de la fin
+        for i, p in enumerate(self.track.points):
+            if not p.timestamp:
+                continue
+                
+            diff_start = abs((p.timestamp - start_time).total_seconds())
+            if diff_start < min_diff_start:
+                min_diff_start = diff_start
+                start_idx = i
+                
+            diff_end = abs((p.timestamp - end_time).total_seconds())
+            if diff_end < min_diff_end:
+                min_diff_end = diff_end
+                end_idx = i
+        
+        if start_idx != -1 and end_idx != -1:
+            # S'assurer de l'ordre (au cas où)
+            if start_idx > end_idx:
+                start_idx, end_idx = end_idx, start_idx
+            
+            # Si le segment est réduit à un seul point (vidéo courte ou points espacés),
+            # on essaie d'élargir pour avoir au moins un segment de ligne
+            if start_idx == end_idx:
+                if start_idx < len(self.track.points) - 1:
+                    end_idx += 1
+                elif start_idx > 0:
+                    start_idx -= 1
+            
+            return self.track.points[start_idx : end_idx + 1]
+                
+        return []

@@ -214,7 +214,15 @@ class FullscreenVideoWindow(QWidget):
     def _close_fullscreen(self):
         self.hide_timer.stop()
         try:
-            self.media_player.stop()
+            # Stop sans raise si déjà relâché/détruit
+            if self.media_player:
+                self.media_player.stop()
+                self.media_player.setSource(QUrl())
+            if self.audio_output:
+                self.media_player.setAudioOutput(None)
+                self.audio_output = None
+        except Exception:
+            pass
         finally:
             if not self._closed_emitted:
                 self.closed.emit()
@@ -226,8 +234,16 @@ class FullscreenVideoWindow(QWidget):
         if self.media_player:
             try:
                 self.media_player.stop()
+                self.media_player.setSource(QUrl())
             except Exception:
                 pass
+        # Déréférencer l'audio pour éviter double libération
+        try:
+            if self.audio_output:
+                self.media_player.setAudioOutput(None)
+                self.audio_output = None
+        except Exception:
+            pass
         if not self._closed_emitted:
             self.closed.emit()
             self._closed_emitted = True
@@ -276,3 +292,18 @@ class FullscreenVideoWindow(QWidget):
 
     def get_current_position(self) -> int:
         return self.media_player.position()
+
+    def cleanup(self):
+        """Libère proprement les ressources multimédia (appelée côté parent si nécessaire)."""
+        try:
+            if self.media_player:
+                self.media_player.stop()
+                self.media_player.setSource(QUrl())
+        except Exception:
+            pass
+        try:
+            if self.audio_output:
+                self.media_player.setAudioOutput(None)
+                self.audio_output = None
+        except Exception:
+            pass

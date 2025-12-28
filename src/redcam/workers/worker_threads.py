@@ -78,7 +78,8 @@ class ProcessingWorker(QThread):
                 locations = self.controller.process_videos(
                     progress_callback=on_progress,
                     force_timestamp_sync=getattr(self, 'force_timestamp_sync', False),
-                    camera_filter=getattr(self, 'camera_filter', "Auto (Détection)")
+                    camera_filter=getattr(self, 'camera_filter', "Auto (Détection)"),
+                    manual_offset_seconds=getattr(self, 'manual_offset_seconds', 0.0)
                 )
                 
                 self.videos_processed.emit(locations)

@@ -11,8 +11,8 @@ from typing import Optional, List
 
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, 
-    QSplitter, QMessageBox, QFrame, QFileDialog, QMenu,
-    QDockWidget, QLabel, QPushButton, QApplication, QMenuBar, QSizePolicy
+    QDockWidget, QLabel, QPushButton, QApplication, QMenuBar, QSizePolicy,
+    QStyle, QTabWidget, QStackedWidget
 )
 from PyQt6.QtGui import QDesktopServices, QAction, QIcon, QMouseEvent
 from PyQt6.QtCore import Qt, QUrl, QPoint, QSize
@@ -22,6 +22,8 @@ from .widgets.file_loader_widget import FileLoaderWidget
 from .widgets.timeline_widget import TimelineWidget
 from .widgets.progress_indicator import ProgressIndicator
 from .widgets.video_player import VideoPlayerWidget
+from .widgets.overlay.overlay_tab_widget import OverlayTabWidget
+from .widgets.workspace_tab_bar import WorkspaceTabBar
 from .theme.styles import WINDOW_STYLE, TITLE_BAR_STYLE
 
 from redcam.services.sync_controller import SyncController
@@ -48,15 +50,18 @@ class CustomTitleBar(QWidget):
         # Boutons de fenêtre (style minimal)
         btn_size = QSize(36, 26)
         
-        self.btn_min = QPushButton("–")
+        self.btn_min = QPushButton()
+        self.btn_min.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_TitleBarMinButton))
         self.btn_min.setFixedSize(btn_size)
         self.btn_min.clicked.connect(self.window().showMinimized)
         
-        self.btn_max = QPushButton("▢")
+        self.btn_max = QPushButton()
+        self.btn_max.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_TitleBarMaxButton))
         self.btn_max.setFixedSize(btn_size)
         self.btn_max.clicked.connect(self._toggle_max)
         
-        self.btn_close = QPushButton("×")
+        self.btn_close = QPushButton()
+        self.btn_close.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_TitleBarCloseButton))
         self.btn_close.setFixedSize(btn_size)
         self.btn_close.setObjectName("close_btn")
         self.btn_close.clicked.connect(self.window().close)
@@ -109,6 +114,10 @@ class MainWindow(QMainWindow):
         self.title_bar = CustomTitleBar(self)
         self.setMenuWidget(self.title_bar)
         
+        # Apply global tab style
+        from .theme.styles import TAB_STYLE
+        self.setStyleSheet(self.styleSheet() + TAB_STYLE)
+        
         # Contrôleur
         self.controller = SyncController()
         
@@ -144,16 +153,48 @@ class MainWindow(QMainWindow):
                 self.loader_widget.set_video_folder(path)
         
     def _init_ui(self) -> None:
-        """Initialise l'interface utilisateur avec Docking."""
-        self.setDockOptions(QMainWindow.DockOption.AnimatedDocks | QMainWindow.DockOption.AllowNestedDocks)
-
-        # 1. Central Widget (Map)
+        """Initialise l'interface utilisateur avec Workspaces style DaVinci."""
+        
+        # ============================================================
+        # ARCHITECTURE PRINCIPALE: Container central avec workspaces
+        # ============================================================
+        
+        # Container principal (remplace setCentralWidget)
+        main_container = QWidget()
+        main_layout = QVBoxLayout(main_container)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+        
+        # Stacked widget pour les workspaces
+        self.workspace_stack = QStackedWidget()
+        main_layout.addWidget(self.workspace_stack, 1)  # Stretch = 1
+        
+        # Barre d'onglets en bas (style DaVinci)
+        self.workspace_tab_bar = WorkspaceTabBar()
+        self.workspace_tab_bar.add_workspace("Maps")
+        self.workspace_tab_bar.add_workspace("Overlay")
+        self.workspace_tab_bar.workspace_changed.connect(self._on_workspace_changed)
+        main_layout.addWidget(self.workspace_tab_bar)
+        
+        self.setCentralWidget(main_container)
+        
+        # ============================================================
+        # WORKSPACE 0: Maps (vue actuelle avec carte, timeline, etc.)
+        # ============================================================
+        self.maps_workspace = QMainWindow()
+        self.maps_workspace.setWindowFlags(Qt.WindowType.Widget)
+        self.maps_workspace.setDockOptions(
+            QMainWindow.DockOption.AnimatedDocks | 
+            QMainWindow.DockOption.AllowNestedDocks
+        )
+        
+        # Central Widget (Map)
         self.map_widget = MapWidget()
         self.map_widget.video_clicked.connect(self._play_video)
-        self.setCentralWidget(self.map_widget)
-
-        # 2. Left Dock (Files & Import)
-        self.dock_files = QDockWidget("Fichier", self)
+        self.maps_workspace.setCentralWidget(self.map_widget)
+        
+        # Left Dock (Files & Import)
+        self.dock_files = QDockWidget("Fichier", self.maps_workspace)
         self.dock_files.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea)
         self.dock_files.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetMovable | QDockWidget.DockWidgetFeature.DockWidgetFloatable)
         self.dock_files.setMinimumWidth(320)
@@ -163,12 +204,11 @@ class MainWindow(QMainWindow):
         self.loader_widget.video_folder_selected.connect(self._on_folder_selected)
         self.loader_widget.sync_requested.connect(self._start_sync)
         self.loader_widget.weak_gps_toggled.connect(self._on_weak_gps_toggled)
-        self.loader_widget.camera_model_changed.connect(lambda _: self._on_weak_gps_toggled(self.force_timestamp_sync))
+        self.loader_widget.camera_model_changed.connect(self._on_camera_model_changed)
         
-        # Container for left dock to include progress bar
         left_container = QWidget()
         left_layout = QVBoxLayout(left_container)
-        left_layout.setContentsMargins(0,0,0,0)
+        left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.addWidget(self.loader_widget)
         
         self.progress_bar = ProgressIndicator()
@@ -176,28 +216,54 @@ class MainWindow(QMainWindow):
         left_layout.addStretch()
         
         self.dock_files.setWidget(left_container)
-        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.dock_files)
-
-        # 3. Video Dock (Right of Map by default)
-        self.dock_video = QDockWidget("Prévisualisation Vidéo", self)
-        self.dock_video.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetMovable | QDockWidget.DockWidgetFeature.DockWidgetFloatable | QDockWidget.DockWidgetFeature.DockWidgetClosable)
+        self.maps_workspace.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.dock_files)
+        
+        # Right Dock (Video Player)
+        self.dock_video = QDockWidget("Prévisualisation Vidéo", self.maps_workspace)
+        self.dock_video.setFeatures(
+            QDockWidget.DockWidgetFeature.DockWidgetMovable | 
+            QDockWidget.DockWidgetFeature.DockWidgetFloatable | 
+            QDockWidget.DockWidgetFeature.DockWidgetClosable
+        )
         self.dock_video.setMinimumWidth(400)
         self.video_player = VideoPlayerWidget()
         self.dock_video.setWidget(self.video_player)
-        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.dock_video)
+        self.maps_workspace.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.dock_video)
         
-        # 4. Timeline Dock (Bottom)
-        self.dock_timeline = QDockWidget("Timeline de Synchronisation", self)
-        self.dock_timeline.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetMovable | QDockWidget.DockWidgetFeature.DockWidgetFloatable)
+        # Bottom Dock (Timeline)
+        self.dock_timeline = QDockWidget("Timeline", self.maps_workspace)
+        self.dock_timeline.setFeatures(
+            QDockWidget.DockWidgetFeature.DockWidgetMovable | 
+            QDockWidget.DockWidgetFeature.DockWidgetFloatable
+        )
         self.dock_timeline.setMinimumHeight(180)
         self.timeline_widget = TimelineWidget()
         self.timeline_widget.time_changed.connect(self._on_timeline_changed)
         self.dock_timeline.setWidget(self.timeline_widget)
-        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_timeline)
-
-        # Connexions croisées
+        self.maps_workspace.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_timeline)
+        
+        # Connexions Maps workspace
         self.timeline_widget.video_selected.connect(self._on_video_selected)
         self.map_widget.video_clicked.connect(self._on_video_selected)
+        
+        self.workspace_stack.addWidget(self.maps_workspace)
+        
+        # ============================================================
+        # WORKSPACE 1: Overlay Generator
+        # ============================================================
+        # ============================================================
+        # WORKSPACE 1: Overlay Generator
+        # ============================================================
+        self.overlay_widget = OverlayTabWidget()
+        self.overlay_widget.presets_updated.connect(self._on_overlay_presets_updated)
+        self.workspace_stack.addWidget(self.overlay_widget)
+        
+        # Démarrer sur Maps
+        self.workspace_stack.setCurrentIndex(0)
+    
+    def _on_workspace_changed(self, index: int) -> None:
+        """Gère le changement de workspace."""
+        self.workspace_stack.setCurrentIndex(index)
 
         
     def _on_fit_selected(self, path: str) -> None:
@@ -255,6 +321,7 @@ class MainWindow(QMainWindow):
         # Passer l'option weak gps et filtre caméra
         self.worker.force_timestamp_sync = self.force_timestamp_sync
         self.worker.camera_filter = self.loader_widget.get_camera_filter()
+        self.worker.manual_offset_seconds = self.loader_widget.get_manual_offset()
         
         # Connecter les signaux du worker
         self.worker.progress.connect(self._on_progress)
@@ -289,6 +356,9 @@ class MainWindow(QMainWindow):
                 )
                 # Afficher les vidéos sur la timeline
                 self.timeline_widget.set_videos(locations)
+            
+            # Mettre à jour l'onglet Overlay
+            self.overlay_widget.set_data(track, locations)
         elif locations:
             self.map_widget.display_videos_only(locations)
         
@@ -309,6 +379,15 @@ class MainWindow(QMainWindow):
         
         # Si on a déjà des données, relancer la synchronisation pour mettre à jour
         # C'est rapide grâce au cache du VideoLocator
+        if (self.controller.video_locations and 
+            self.worker is None and 
+            self.controller.fit_path and 
+            self.controller.video_folder):
+            self._start_sync()
+
+    def _on_camera_model_changed(self, model: str) -> None:
+        """Gère le changement de modèle de caméra."""
+        # Relancer la synchronisation si possible
         if (self.controller.video_locations and 
             self.worker is None and 
             self.controller.fit_path and 
@@ -371,7 +450,15 @@ class MainWindow(QMainWindow):
             self.worker.terminate()
             self.worker.wait()
         
-        self.map_widget.cleanup()
+        if self.map_widget:
+            self.map_widget.cleanup()
+            
+        if self.timeline_widget:
+            self.timeline_widget.cleanup()
+        
+        if self.overlay_widget:
+            self.overlay_widget.cleanup()
+            
         if self.video_player:
             self.video_player.close_player()
             
@@ -489,7 +576,9 @@ class MainWindow(QMainWindow):
                 'fit_path': self.controller.fit_path,
                 'video_folder': self.controller.video_folder,
                 'force_timestamp_sync': self.force_timestamp_sync,
-                'video_metadata': video_metadata
+                'manual_offset_seconds': self.loader_widget.get_manual_offset(),
+                'video_metadata': video_metadata,
+                'overlay_presets': self.overlay_widget.presets
             }
             if self.project_manager.save_project(path, data):
                 self.statusBar().showMessage(f"Projet enregistré: {os.path.basename(path)}", 3000)
@@ -511,14 +600,25 @@ class MainWindow(QMainWindow):
             return
             
         self.current_project_path = path
+        self.setWindowTitle(f"RedCAM - {os.path.basename(path)}")
         
         # Appliquer les données
         fit_path = data.get('fit_path')
         video_folder = data.get('video_folder')
         force_weak = data.get('force_timestamp_sync', False)
+        manual_offset = data.get('manual_offset_seconds', 0.0)
         
         # Stocker les métadonnées pour application après traitement
         self.pending_metadata = data.get('video_metadata', {})
+
+        # Charger les presets d'overlay
+        if 'overlay_presets' in data:
+            self.overlay_widget.presets = data['overlay_presets']
+            # Update combobox in settings
+            self.overlay_widget.settings.presets = data['overlay_presets']
+            self.overlay_widget.settings.combo_presets.clear()
+            self.overlay_widget.settings.combo_presets.addItem("Par défaut")
+            self.overlay_widget.settings.combo_presets.addItems(sorted(data['overlay_presets'].keys()))
         
         if fit_path:
             self.loader_widget.set_fit_file(fit_path)
@@ -527,6 +627,7 @@ class MainWindow(QMainWindow):
             self.loader_widget.set_video_folder(video_folder)
             
         self.loader_widget.set_weak_gps(force_weak)
+        self.loader_widget.set_manual_offset(manual_offset)
         self.force_timestamp_sync = force_weak
         
         # Mettre à jour le menu récent
@@ -537,3 +638,7 @@ class MainWindow(QMainWindow):
         if fit_path and video_folder and os.path.exists(fit_path) and os.path.exists(video_folder):
             self._start_sync()
 
+    def _on_overlay_presets_updated(self, presets: dict) -> None:
+        """Appelé quand les presets overlay changent -> sauvegarde auto."""
+        if self.current_project_path:
+            self._save_project()

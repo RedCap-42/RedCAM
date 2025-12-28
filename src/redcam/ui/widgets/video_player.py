@@ -52,7 +52,7 @@ class VideoPlayerWidget(QGroupBox):
         self.setStyleSheet("""
             QGroupBox {
                 border: 1px solid #3a3a3a;
-                border-radius: 8px;
+                border-radius: 0px;
                 margin-top: 10px;
                 font-weight: 700;
                 color: #e0e0e0;
@@ -243,5 +243,9 @@ class VideoPlayerWidget(QGroupBox):
             except Exception as e:
                 print(f"Erreur retour plein écran: {e}")
             finally:
+                try:
+                    self.fullscreen_window.cleanup()
+                except Exception:
+                    pass
                 self.fullscreen_window = None
 

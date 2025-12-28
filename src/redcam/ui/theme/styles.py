@@ -261,3 +261,28 @@ QComboBox QAbstractItemView {{
 }}
 """
 
+TAB_STYLE = f"""
+QTabBar::tab {{
+    background: {COLOR_PANEL};
+    color: {COLOR_TEXT_SECONDARY};
+    padding: 8px 12px;
+    border-top: 2px solid transparent;
+    border-right: 1px solid {COLOR_BORDER};
+    margin-right: 1px;
+}}
+QTabBar::tab:selected {{
+    background: {COLOR_BACKGROUND};
+    color: {COLOR_TEXT_PRIMARY};
+    border-top: 2px solid {COLOR_ACCENT};
+    font-weight: bold;
+}}
+QTabBar::tab:hover {{
+    background: {COLOR_HOVER};
+    color: {COLOR_TEXT_PRIMARY};
+}}
+QTabWidget::pane {{
+    border: 1px solid {COLOR_BORDER};
+    background: {COLOR_BACKGROUND};
+}}
+"""
+

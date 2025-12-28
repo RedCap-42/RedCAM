@@ -117,6 +117,7 @@ class VideoLocation:
     source: LocationSource = LocationSource.UNKNOWN
     creation_time: Optional[datetime] = None
     duration_seconds: Optional[float] = None
+    track_points: Optional[List[GPSPoint]] = None
     
     # Custom properties (User editable)
     custom_name: Optional[str] = None

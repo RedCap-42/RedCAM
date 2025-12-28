@@ -68,7 +68,12 @@ class SyncVideosUseCase:
             force_timestamp_sync = True
 
         raw_creation_time = self.video_metadata.get_creation_time(video_path)
-        creation_time = self._smart_correct_timestamp(raw_creation_time, video_path)
+        
+        # Appliquer le décalage manuel
+        if raw_creation_time and request.manual_offset_seconds != 0:
+            raw_creation_time = raw_creation_time + timedelta(seconds=request.manual_offset_seconds)
+            
+        creation_time = self._smart_correct_timestamp(raw_creation_time, video_path, 0.0) # Offset déjà appliqué
         duration_seconds = self.video_metadata.get_duration_seconds(video_path)
 
         embedded_points = None
@@ -85,12 +90,14 @@ class SyncVideosUseCase:
                 source=LocationSource.EMBEDDED_GPS,
                 creation_time=creation_time,
                 duration_seconds=duration_seconds,
+                track_points=embedded_points
             )
 
         if self.track_sync and self.track_sync.track and creation_time:
             utc_time = self._ensure_utc(creation_time)
             position = self.track_sync.get_position_at_time(utc_time)
             if position:
+                track_segment = self.track_sync.get_track_segment(utc_time, duration_seconds or 0)
                 return VideoLocation(
                     video_path=video_path,
                     video_name=video_name,
@@ -98,6 +105,7 @@ class SyncVideosUseCase:
                     source=LocationSource.FIT_SYNC,
                     creation_time=creation_time,
                     duration_seconds=duration_seconds,
+                    track_points=track_segment
                 )
 
         return VideoLocation(
@@ -109,9 +117,13 @@ class SyncVideosUseCase:
             duration_seconds=duration_seconds,
         )
 
-    def _smart_correct_timestamp(self, creation_time: Optional[datetime], video_path: str) -> Optional[datetime]:
+    def _smart_correct_timestamp(self, creation_time: Optional[datetime], video_path: str, manual_offset: float = 0.0) -> Optional[datetime]:
         if not creation_time:
             return None
+            
+        # 0) Appliquer le décalage manuel
+        if manual_offset != 0.0:
+            creation_time = creation_time + timedelta(seconds=manual_offset)
 
         # 1) FIT sync (prioritaire) : tester décalages usuels
         if self.track_sync and self.track_sync.track:

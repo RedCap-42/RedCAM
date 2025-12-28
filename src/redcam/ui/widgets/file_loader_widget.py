@@ -82,7 +82,7 @@ class FileLoaderWidget(QWidget):
         layout.addWidget(group_fit)
         
         # --- Section Vidéos ---
-        group_video = QGroupBox("Vidéos GoPro")
+        group_video = QGroupBox("Vidéos")
         group_video.setStyleSheet(GROUPBOX_STYLE)
         video_layout = QVBoxLayout(group_video)
         
@@ -91,7 +91,14 @@ class FileLoaderWidget(QWidget):
         cam_label = QLabel("Caméra:")
         cam_label.setStyleSheet(LABEL_STYLE)
         self.combo_cam = QComboBox()
-        self.combo_cam.addItems(["Auto (Détection)", "Hero 10 ou + (GPS)", "Hero 9 ou - (GPS)", "Hero 12 (Pas de GPS)"])
+        self.combo_cam.addItems([
+            "Auto (Détection)", 
+            "Hero 10 ou + (GPS)", 
+            "Hero 9 ou - (GPS)", 
+            "Hero 12 (Pas de GPS)",
+            "DJI (Synchro .fit)",
+            "Insta360 (Synchro .fit)"
+        ])
         self.combo_cam.setStyleSheet(COMBO_STYLE)
         self.combo_cam.currentTextChanged.connect(self.camera_model_changed.emit)
         cam_layout.addWidget(cam_label)
@@ -225,6 +232,17 @@ class FileLoaderWidget(QWidget):
     def get_camera_filter(self) -> str:
         """Retourne le filtre de caméra sélectionné."""
         return self.combo_cam.currentText()
+    
+    def get_manual_offset(self) -> float:
+        """Retourne le décalage manuel en secondes."""
+        return self.scrubber_offset.value()
+
+    def set_manual_offset(self, value: float) -> None:
+        """Définit le décalage manuel (en secondes)."""
+        try:
+            self.scrubber_offset.setValue(float(value))
+        except Exception:
+            self.scrubber_offset.setValue(0.0)
     
     def reset(self) -> None:
         """Réinitialise le widget."""
