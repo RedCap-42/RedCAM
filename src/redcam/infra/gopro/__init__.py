@@ -1,0 +1,1 @@
+"""GoPro adapters (ffmpeg/GPMF)."""

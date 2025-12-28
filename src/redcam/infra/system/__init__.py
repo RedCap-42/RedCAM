@@ -1,0 +1,1 @@
+"""Adapters système (filesystem/horodatages)."""

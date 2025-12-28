@@ -1,0 +1,13 @@
+# RedCAM - Dépendances
+# Framework UI
+PyQt6>=6.4.0
+PyQt6-WebEngine>=6.4.0
+
+# Parsing fichiers Garmin .fit
+fitparse>=1.2.0
+
+# Génération de cartes
+folium>=0.14.0
+
+# Gestion des timezones
+pytz>=2023.3
